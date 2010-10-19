@@ -25,3 +25,8 @@ updateStatus token status = unwrap $ do
 
 publicTimeline :: IO Response
 publicTimeline  = unwrap $ doRequest GET "statuses/public_timeline" []
+
+homeTimeline :: Token -> IO Response
+homeTimeline token = unwrap $ do
+    putToken token
+    doRequest GET "statuses/home_timeline" []
