@@ -1,12 +1,15 @@
-module Web.Twitter.OAuth where
+module Web.Twitter.OAuth
+       ( getAuthenticateURL
+       , makeToken
+       , Consumer
+       ) where
 
 import Data.Maybe (fromJust)
-import Control.Monad.Trans
+import Control.Applicative ((<$>))
+import Control.Monad.Trans (MonadIO)
 import Network.OAuth.Consumer
-import Network.OAuth.Http.Request
-import Network.OAuth.Http.Response
-import Network.OAuth.Http.HttpClient
-import Network.OAuth.Http.PercentEncoding
+import Network.OAuth.Http.Request (parseURL, findWithDefault)
+import Network.OAuth.Http.HttpClient (HttpClient)
 
 
 reqUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/request_token"
@@ -22,31 +25,25 @@ data Consumer = Consumer
     , secret :: String }
     deriving (Show, Eq)
 
-authenticate :: Consumer -> IO Token
-authenticate consumer = unCurlM . runOAuth $ do
+getAuthenticateURL :: (HttpClient m, MonadIO m) => Consumer -> OAuthMonad m String
+getAuthenticateURL consumer = do
     ignite $ Application (key consumer) (secret consumer) OOB 
     oauthRequest HMACSHA1 Nothing reqUrl
-    cliAskAuthorization authUrl
+    authUrl <$> getToken
+
+makeToken :: (HttpClient m, MonadIO m) => String -> OAuthMonad m Token
+makeToken answer = do
+    token <- getToken
+    putToken $ injectOAuthVerifier answer token
     oauthRequest HMACSHA1 Nothing accUrl
     getToken
 
-singleAccessToken :: Consumer -> String -> String -> IO Token
-singleAccessToken consumer accToken accSecret = unCurlM . runOAuth $ do
-    let app = Application (key consumer) (secret consumer) OOB
-    let newToken = [("oauth_token", accToken)
-                   ,("oauth_token_secret", accSecret)]
-    ignite app
-    token <- getToken
-    return $ AccessToken app (fromList newToken `union` oauthParams token)
-
-tweet :: Consumer -> Token -> String -> IO Response
-tweet consumer token message = unCurlM . runOAuth $ do
-    ignite $ Application (key consumer) (secret consumer) OOB
-    putToken token
-    -- I can't figure out how to put the status in the POST body, but putting
-    -- it in the query string works.
-    let body = "status=" ++ encode message
-        request = tweetUrl { method = POST
-                           , qString = fromList [("status", message)]
-                           }
-    serviceRequest HMACSHA1 Nothing request
+{-
+Sample code:
+authenticate :: Consumer -> IO Token
+authenticate consumer = unCurlM . runOAuth $ do
+    ignite $ Application (key consumer) (secret consumer) OOB 
+    url <- getAuthenticateURL consumer
+    liftIO . putStr $ "open " ++ url ++ "\nverifier: "
+    makeToken =<< liftIO getLine
+-}
