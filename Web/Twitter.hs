@@ -5,11 +5,21 @@ module Web.Twitter
 
 import Data.Maybe (fromJust)
 import Web.Twitter.OAuth
+import Control.Monad
+import Control.Applicative ((<$>))
 import Control.Monad.Trans (liftIO, MonadIO)
 import Network.OAuth.Consumer
 import Network.OAuth.Http.Request
 import Network.OAuth.Http.Response
 import Network.OAuth.Http.HttpClient
+import Text.JSON
+import qualified Data.ByteString.Lazy.Char8 as L8
+
+data Tweet = Tweet { user :: String
+                   , text :: String
+                   } deriving (Eq, Show)
+
+unResult = \(Ok x) -> x
 
 buildRequest ::  Method -> String -> [(String, String)] -> Request
 buildRequest method part query =
@@ -23,10 +33,28 @@ updateStatus token status = unwrap $ do
     putToken token
     doRequest POST "statuses/update"  [("status", status)]
 
-publicTimeline :: IO Response
-publicTimeline  = unwrap $ doRequest GET "statuses/public_timeline" []
+parseTimeline :: Response -> [Tweet]
+parseTimeline rsp = unResult $ do
+    json <- decode . L8.unpack . rspPayload $ rsp
+    tweets <- (readJSONs json :: Result [JSValue]) >>= mapM readJSON
+    return $ handleTweet <$> tweets
+      where handleTweet tweet = Tweet { user = unResult $ valFromObj "user" tweet >>= valFromObj "screen_name"
+                                      , text = unResult $ valFromObj "text" tweet}
 
-homeTimeline :: Token -> IO Response
-homeTimeline token = unwrap $ do
+publicTimeline :: IO [Tweet]
+publicTimeline  = fmap parseTimeline . unwrap $ doRequest GET "statuses/public_timeline" []
+
+homeTimeline :: Token -> IO [Tweet]
+homeTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/home_timeline" []
+
+friendsTimeline :: Token -> IO [Tweet]
+friendsTimeline token = fmap parseTimeline . unwrap $ do
+    putToken token
+    doRequest GET "statuses/friends_timeline" []
+
+mentions :: Token -> IO [Tweet]
+mentions token = fmap parseTimeline . unwrap $ do
+    putToken token
+    doRequest GET "statuses/mentions" []
