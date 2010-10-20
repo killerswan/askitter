@@ -54,6 +54,15 @@ friendsTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/friends_timeline" []
 
+userTimeline :: Token -> String -> IO [Tweet]
+userTimeline token name = fmap parseTimeline . unwrap $ do
+    putToken token
+    doRequest GET "statuses/user_timeline" [("screen_name", name)]
+
+userTimeline' :: String -> IO [Tweet]
+userTimeline' name = fmap parseTimeline . unwrap $ do
+    doRequest GET "statuses/user_timeline" [("screen_name", name)]
+    
 mentions :: Token -> IO [Tweet]
 mentions token = fmap parseTimeline . unwrap $ do
     putToken token
