@@ -1,3 +1,4 @@
+{-# LANGUAGE NoMonomorphismRestriction #-}
 module Web.Twitter
        ( updateStatus
        , publicTimeline
@@ -19,6 +20,14 @@ data Tweet = Tweet { user :: String
                    , text :: String
                    } deriving (Eq, Show)
 
+makeTweet :: JSObject JSValue -> Tweet
+makeTweet tweet = Tweet { user = unResult $ valFromObj "user" tweet >>= valFromObj "screen_name"
+                        , text = unResult $ valFromObj "text" tweet}
+                  
+
+makeJson :: (JSON a) => Response -> Result a
+makeJson = decode . L8.unpack . rspPayload
+
 unResult = \(Ok x) -> x
 
 buildRequest ::  Method -> String -> [(String, String)] -> Request
@@ -35,11 +44,11 @@ updateStatus token status = unwrap $ do
 
 parseTimeline :: Response -> [Tweet]
 parseTimeline rsp = unResult $ do
-    json <- decode . L8.unpack . rspPayload $ rsp
+    json <- makeJson rsp
     tweets <- (readJSONs json :: Result [JSValue]) >>= mapM readJSON
-    return $ handleTweet <$> tweets
-      where handleTweet tweet = Tweet { user = unResult $ valFromObj "user" tweet >>= valFromObj "screen_name"
-                                      , text = unResult $ valFromObj "text" tweet}
+    return $ makeTweet <$> tweets
+
+
 
 publicTimeline :: IO [Tweet]
 publicTimeline  = fmap parseTimeline . unwrap $ doRequest GET "statuses/public_timeline" []
@@ -54,16 +63,27 @@ friendsTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/friends_timeline" []
 
-userTimeline :: Token -> String -> IO [Tweet]
-userTimeline token name = fmap parseTimeline . unwrap $ do
+authUserTimeline :: Token -> String -> IO [Tweet]
+authUserTimeline token name = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/user_timeline" [("screen_name", name)]
 
-userTimeline' :: String -> IO [Tweet]
-userTimeline' name = fmap parseTimeline . unwrap $ do
+userTimeline :: String -> IO [Tweet]
+userTimeline name = fmap parseTimeline . unwrap $ do
     doRequest GET "statuses/user_timeline" [("screen_name", name)]
     
 mentions :: Token -> IO [Tweet]
 mentions token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/mentions" []
+
+getTweet :: String -> IO Tweet
+getTweet tweetId = unwrap $ do
+    rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
+    return . makeTweet . unResult . makeJson $ rsp
+
+authGetTweet :: Token -> String -> IO Tweet
+authGetTweet token tweetId = unwrap $ do
+    putToken token
+    rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
+    return . makeTweet . unResult . makeJson $ rsp
