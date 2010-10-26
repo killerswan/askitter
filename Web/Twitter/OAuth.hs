@@ -52,7 +52,7 @@ authenticate consumer = unwrap $ do
     makeToken =<< liftIO getLine
 
 writeToken :: Token -> FilePath -> IO ()
-writeToken token path = L.writeFile path (B.encode token)
+writeToken token path = L.writeFile path (encode token)
 
 readToken :: FilePath -> IO Token
-readToken path = L.readFile path >>= return . B.decode
+readToken path = fmap decode (L.readFile path)

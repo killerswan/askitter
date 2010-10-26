@@ -32,15 +32,12 @@ data Tweet = Tweet { user :: String
 data TwitterException = NotFound | AccessForbidden | OtherError deriving (Eq, Show, Typeable)
 instance Exception TwitterException
 
-parseError = undefined
-
 makeTweet :: JSObject JSValue -> Result Tweet
 makeTweet tweet = do
     userObject <- valFromObj "user" tweet
     user <- valFromObj "screen_name" userObject
     text <- valFromObj "text" tweet
     return Tweet {user = user, text = text}
-                  
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -82,16 +79,15 @@ friendsTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/friends_timeline" []
 
+userTimeline :: String -> IO [Tweet]
+userTimeline name = fmap parseTimeline . unwrap $
+    doRequest GET "statuses/user_timeline" [("screen_name", name)]
+
 authUserTimeline :: Token -> String -> IO [Tweet]
 authUserTimeline token name = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/user_timeline" [("screen_name", name)]
 
-
-userTimeline :: String -> IO [Tweet]
-userTimeline name = fmap parseTimeline . unwrap $ do
-    doRequest GET "statuses/user_timeline" [("screen_name", name)]
-    
 mentions :: Token -> IO [Tweet]
 mentions token = fmap parseTimeline . unwrap $ do
     putToken token
