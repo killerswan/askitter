@@ -1,6 +1,12 @@
 {-# LANGUAGE DeriveDataTypeable, NoMonomorphismRestriction #-}
 module Web.Twitter
-       ( updateStatus
+       ( updateStatus,
+         publicTimeline,
+         homeTimeline,
+         friendsTimeline,
+         authUserTimeline,
+         userTimeline,
+         mentions
        ) where
 
 import Data.Maybe (fromJust)
