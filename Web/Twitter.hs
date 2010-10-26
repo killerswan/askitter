@@ -6,7 +6,9 @@ module Web.Twitter
          friendsTimeline,
          authUserTimeline,
          userTimeline,
-         mentions
+         mentions,
+         getTweet,
+         authGetTweet
        ) where
 
 import Data.Maybe (fromJust)
@@ -50,11 +52,6 @@ buildRequest method part query =
 doRequest :: (MonadIO m, HttpClient m) => Method -> String -> [(String, String)] -> OAuthMonad m Response
 doRequest meth part query = serviceRequest HMACSHA1 Nothing $ buildRequest meth part query
 
-updateStatus :: Token -> String -> IO Response
-updateStatus token status = unwrap $ do
-    putToken token
-    doRequest POST "statuses/update"  [("status", status)]
-
 handleErrors parser rsp = case (parser rsp) of
     Ok parsed -> parsed
     Error _ -> case status rsp of 
@@ -67,10 +64,13 @@ parseTimeline = handleErrors $ \rsp -> do
     tweets <- readJSONs json >>= mapM readJSON
     mapM makeTweet tweets
 
+updateStatus :: Token -> String -> IO Response
+updateStatus token status = unwrap $ do
+    putToken token
+    doRequest POST "statuses/update"  [("status", status)]
 
 publicTimeline :: IO [Tweet]
 publicTimeline  = fmap parseTimeline . unwrap $ doRequest GET "statuses/public_timeline" []
-
 
 homeTimeline :: Token -> IO [Tweet]
 homeTimeline token = fmap parseTimeline . unwrap $ do
