@@ -65,7 +65,7 @@ handleErrors parser rsp = case (parser rsp) of
 parseTimeline = handleErrors $ \rsp -> do 
     json <- makeJSON rsp
     tweets <- readJSONs json >>= mapM readJSON
-    sequence $ map makeTweet tweets
+    mapM makeTweet tweets
 
 
 publicTimeline :: IO [Tweet]
@@ -96,15 +96,14 @@ mentions :: Token -> IO [Tweet]
 mentions token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/mentions" []
-{-
+
 getTweet :: String -> IO Tweet
 getTweet tweetId = unwrap $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . makeTweet . (handleErrors makeJSON) $ rsp
+    return . handleErrors (makeJSON >=> makeTweet) $ rsp
 
 authGetTweet :: Token -> String -> IO Tweet
 authGetTweet token tweetId = unwrap $ do
     putToken token
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . makeTweet . (handleErrors makeJSON) $ rsp
--}
+    return . handleErrors (makeJSON >=> makeTweet) $ rsp
