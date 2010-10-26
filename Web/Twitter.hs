@@ -8,7 +8,8 @@
 -- Portability: portable
 --
 -- Twitter bindings that use OAuth instead of basic authentication.
---
+-- Any function here that returns a value might also throw a NotFound, AccessForbidden, or OtherError
+-- if Twitter gives it the appropriate error (HTTP 404, HTTP 401, or anything else)
 -----------------------------------------------------
 
 {-# LANGUAGE DeriveDataTypeable, NoMonomorphismRestriction #-}
@@ -21,8 +22,10 @@ module Web.Twitter
          authUserTimeline,
          userTimeline,
          mentions,
-         getTweet,
-         authGetTweet
+         getStatus,
+         authGetStatus,
+         Status(..),
+         TwitterException(..)
        ) where
 
 import Data.Maybe (fromJust)
@@ -39,19 +42,26 @@ import Control.Exception
 import Data.Typeable (Typeable)
 import qualified Data.ByteString.Lazy.Char8 as L8
 
-data Tweet = Tweet { user :: String
-                   , text :: String
-                   } deriving (Eq, Show)
+-- | A type representing a single status update, or 'tweet'.
+data Status = Status {
+    user :: String, -- ^ The username of the poster of the status.
+    text :: String  -- ^ The content of the status update.
+    } deriving (Eq, Show)
 
-data TwitterException = NotFound | AccessForbidden | OtherError deriving (Eq, Show, Typeable)
+-- | A type representing an error that happened while doing something Twitter-related.
+data TwitterException
+     = NotFound        -- ^ The requested object was not found.
+     | AccessForbidden -- ^ You do not have permission to access the requested entity.
+     | OtherError      -- ^ Something else went wrong.
+     deriving (Eq, Show, Typeable)
 instance Exception TwitterException
 
-makeTweet :: JSObject JSValue -> Result Tweet
-makeTweet tweet = do
+makeStatus :: JSObject JSValue -> Result Status
+makeStatus tweet = do
     userObject <- valFromObj "user" tweet
     user <- valFromObj "screen_name" userObject
     text <- valFromObj "text" tweet
-    return Tweet {user = user, text = text}
+    return Status {user = user, text = text}
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -73,47 +83,47 @@ handleErrors parser rsp = case (parser rsp) of
 parseTimeline = handleErrors $ \rsp -> do 
     json <- makeJSON rsp
     tweets <- readJSONs json >>= mapM readJSON
-    mapM makeTweet tweets
+    mapM makeStatus tweets
 
 updateStatus :: Token -> String -> IO Response
 updateStatus token status = unwrap $ do
     putToken token
     doRequest POST "statuses/update"  [("status", status)]
     
-publicTimeline :: IO [Tweet]
+publicTimeline :: IO [Status]
 publicTimeline  = fmap parseTimeline . unwrap $ doRequest GET "statuses/public_timeline" []
 
-homeTimeline :: Token -> IO [Tweet]
+homeTimeline :: Token -> IO [Status]
 homeTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/home_timeline" []
 
-friendsTimeline :: Token -> IO [Tweet]
+friendsTimeline :: Token -> IO [Status]
 friendsTimeline token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/friends_timeline" []
 
-userTimeline :: String -> IO [Tweet]
+userTimeline :: String -> IO [Status]
 userTimeline name = fmap parseTimeline . unwrap $
     doRequest GET "statuses/user_timeline" [("screen_name", name)]
 
-authUserTimeline :: Token -> String -> IO [Tweet]
+authUserTimeline :: Token -> String -> IO [Status]
 authUserTimeline token name = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/user_timeline" [("screen_name", name)]
 
-mentions :: Token -> IO [Tweet]
+mentions :: Token -> IO [Status]
 mentions token = fmap parseTimeline . unwrap $ do
     putToken token
     doRequest GET "statuses/mentions" []
 
-getTweet :: String -> IO Tweet
-getTweet tweetId = unwrap $ do
+getStatus :: String -> IO Status
+getStatus tweetId = unwrap $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . handleErrors (makeJSON >=> makeTweet) $ rsp
+    return . handleErrors (makeJSON >=> makeStatus) $ rsp
 
-authGetTweet :: Token -> String -> IO Tweet
-authGetTweet token tweetId = unwrap $ do
+authGetStatus :: Token -> String -> IO Status
+authGetStatus token tweetId = unwrap $ do
     putToken token
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . handleErrors (makeJSON >=> makeTweet) $ rsp
+    return . handleErrors (makeJSON >=> makeStatus) $ rsp
