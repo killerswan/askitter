@@ -1,4 +1,18 @@
+----------------------------------------------------
+-- |
+-- Module: Web.Twitter
+-- Description: OAuth Twitter bindings
+-- License: MIT
+-- Maintainer: Patrick Hurst <phurst@mit.edu>
+-- Stability: experimental
+-- Portability: portable
+--
+-- Twitter bindings that use OAuth instead of basic authentication.
+--
+-----------------------------------------------------
+
 {-# LANGUAGE DeriveDataTypeable, NoMonomorphismRestriction #-}
+
 module Web.Twitter
        ( updateStatus,
          publicTimeline,
@@ -65,7 +79,7 @@ updateStatus :: Token -> String -> IO Response
 updateStatus token status = unwrap $ do
     putToken token
     doRequest POST "statuses/update"  [("status", status)]
-
+    
 publicTimeline :: IO [Tweet]
 publicTimeline  = fmap parseTimeline . unwrap $ doRequest GET "statuses/public_timeline" []
 
