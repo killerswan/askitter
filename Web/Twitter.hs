@@ -88,10 +88,7 @@ handleErrors parser rsp = case parser rsp of
 
 -- Take a timeline response and turn it into a list of Statuses.
 parseTimeline :: Response -> [Status]
-parseTimeline = handleErrors $ \rsp -> do 
-    json <- makeJSON rsp
-    tweets <- readJSONs json >>= mapM readJSON
-    mapM makeStatus tweets
+parseTimeline = handleErrors $ makeJSON >=> mapM makeStatus
 
 -- | Update the authenticating user's timeline with the given status
 -- string. Returns IO () always, but doesn't do any exception
