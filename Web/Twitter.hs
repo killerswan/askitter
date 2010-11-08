@@ -48,6 +48,14 @@ data Status = Status {
     text :: String  -- ^ The content of the status update.
     } deriving (Eq, Show)
 
+instance JSON Status where
+    readJSON (JSObject tweet) = let (!) = flip valFromObj in do
+        userObject <- tweet ! "user"
+        user <- userObject ! "screen_name"
+        text <- tweet ! "text"
+        return Status {user = user, text = text}
+    showJSON = undefined
+
 -- | A type representing an error that happened while doing something Twitter-related.
 data TwitterException
      = NotFound        -- ^ The requested object was not found.
@@ -55,16 +63,6 @@ data TwitterException
      | OtherError      -- ^ Something else went wrong.
      deriving (Eq, Show, Typeable)
 instance Exception TwitterException
-
--- Turn a JSON object corresponding to a status into a Status object, but
--- error out if parsing fails.
-makeStatus :: JSObject JSValue -> Result Status
-makeStatus tweet = do
-    userObject <- valFromObj "user" tweet
-    user <- valFromObj "screen_name" userObject
-    text <- valFromObj "text" tweet
-    return Status {user = user, text = text}
-
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -88,7 +86,7 @@ handleErrors parser rsp = case parser rsp of
 
 -- Take a timeline response and turn it into a list of Statuses.
 parseTimeline :: Response -> [Status]
-parseTimeline = handleErrors $ makeJSON >=> mapM makeStatus
+parseTimeline = handleErrors $ makeJSON >=> readJSON
 
 -- | Update the authenticating user's timeline with the given status
 -- string. Returns IO () always, but doesn't do any exception
@@ -145,11 +143,11 @@ mentions token = fmap parseTimeline . unwrap $ do
 getStatus :: String -> IO Status
 getStatus tweetId = unwrap $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . handleErrors (makeJSON >=> makeStatus) $ rsp
+    return . handleErrors (makeJSON >=> readJSON) $ rsp
 
 -- | Get a @Status@ corresponding to the given id, with authentication
 authGetStatus :: Token -> String -> IO Status
 authGetStatus token tweetId = unwrap $ do
     putToken token
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
-    return . handleErrors (makeJSON >=> makeStatus) $ rsp
+    return . handleErrors (makeJSON >=> readJSON) $ rsp
