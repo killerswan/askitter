@@ -3,7 +3,6 @@ module Web.Twitter.OAuth
        , makeToken
        , Consumer(..)
        , authenticate
-       , unwrap
        , writeToken
        , readToken
        ) where
@@ -12,8 +11,8 @@ import Data.Maybe (fromJust)
 import Control.Applicative ((<$>))
 import Control.Monad.Trans (MonadIO, liftIO)
 import Network.OAuth.Consumer
-import Network.OAuth.Http.Request (parseURL, findWithDefault)
-import Network.OAuth.Http.HttpClient (HttpClient, unCurlM)
+import Network.OAuth.Http.Request
+import Network.OAuth.Http.CurlHttpClient
 import qualified Data.ByteString.Lazy as L
 import Data.Binary as B
 
@@ -24,29 +23,29 @@ accUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/access_token"
 authUrl = ("https://api.twitter.com/oauth/authorize?oauth_token=" ++)
             . findWithDefault ("oauth_token","") . oauthParams
 
-unwrap = unCurlM . runOAuth
+request :: SigMethod -> Maybe Realm -> Request -> OAuthMonadT IO Token
+request = \method realm request -> signRq2 method realm request >>= oauthRequest CurlClient
 
 data Consumer = Consumer
     { key :: String
     , secret :: String }
     deriving (Show, Eq)
 
-getAuthenticateURL :: (HttpClient m, MonadIO m) => Consumer -> OAuthMonad m String
+getAuthenticateURL :: Consumer -> OAuthMonadT IO String
 getAuthenticateURL consumer = do
     ignite $ Application (key consumer) (secret consumer) OOB 
-    oauthRequest HMACSHA1 Nothing reqUrl
+    request HMACSHA1 Nothing reqUrl
     authUrl <$> getToken
 
-makeToken :: (HttpClient m, MonadIO m) => String -> OAuthMonad m Token
+makeToken :: String -> OAuthMonadT IO Token
 makeToken answer = do
     token <- getToken
     putToken $ injectOAuthVerifier answer token
-    oauthRequest HMACSHA1 Nothing accUrl
+    request HMACSHA1 Nothing accUrl
     getToken
 
 authenticate :: Consumer -> IO Token
-authenticate consumer = unwrap $ do
-    ignite $ Application (key consumer) (secret consumer) OOB 
+authenticate consumer = runOAuthM (fromApplication $ Application (key consumer) (secret consumer) OOB) $ do
     url <- getAuthenticateURL consumer
     liftIO . putStr $ "open " ++ url ++ "\nverifier: "
     makeToken =<< liftIO getLine
