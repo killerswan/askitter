@@ -64,6 +64,31 @@ data TwitterException
      | OtherError      -- ^ Something else went wrong.
      deriving (Eq, Show, Typeable)
 instance Exception TwitterException
+type StatusID = String
+
+data Option = SinceID StatusID |
+              MaxID StatusID |
+              Count Integer |
+              Page Integer |
+              IncludeRTs Bool |
+              UserID String |
+              ScreenName String |
+              PerPage Integer
+              deriving (Show)
+
+toQuery :: [Option] -> [(String, String)]
+toQuery = map toQuery' where
+  toQuery' opt =
+      case opt of
+          SinceID id ->  ("since_id", id)
+          MaxID id -> ("max_id", id)
+          Count count -> ("count", show count)
+          Page page -> ("page", show page)
+          IncludeRTs True -> ("include_rts", "true")
+          IncludeRTs False -> ("include_rts", "false")
+          UserID id -> ("user_id", id)
+          ScreenName name -> ("screen_name", name)
+          PerPage perPage -> ("per_page", show perPage)
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -97,7 +122,7 @@ parseTimeline = handleErrors $ makeJSON >=> readJSON
 -- handling. Someday I'll fix that.
 updateStatus :: Token -> String -> IO ()
 updateStatus token status = runOAuthM token $ do
-    doRequest POST "statuses/update"  [("status", status)]
+    doRequest POST "statuses/update"  []
     return ()
 
 -- | Get the public timeline as a list of statuses.
@@ -107,43 +132,43 @@ publicTimeline  = fmap parseTimeline . withoutAuth $ doRequest GET "statuses/pub
 -- | Get the last 20 updates of the authenticating user's home
 -- timeline, meaning all their statuses and those of their
 -- friends. Will throw an @AccessForbidden@ if your token is invalid.
-homeTimeline :: Token -> IO [Status]
-homeTimeline token = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/home_timeline" []
+homeTimeline :: Token -> [Option] -> IO [Status]
+homeTimeline token opts = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/home_timeline" (toQuery opts)
 
 -- | Get the authenticating user's friends timeline. This is the same
 -- as their home timeline, except it excludes RTs by default. Note
 -- that if 5 of the last 20 tweets were RTs, this will only return 15
 -- statuses.
-friendsTimeline :: Token -> IO [Status]
-friendsTimeline token = fmap parseTimeline . runOAuthM token $ do
+friendsTimeline :: Token -> [Option] -> IO [Status]
+friendsTimeline token opts = fmap parseTimeline . runOAuthM token $ do
     putToken token
-    doRequest GET "statuses/friends_timeline" []
+    doRequest GET "statuses/friends_timeline" (toQuery opts)
 
 -- | Get the last 20 tweets, without RTs, of the given username,
 -- without authentication. If this throws an @AccessForbidden@ error,
 -- the user's timeline is protected.
-userTimeline :: String -> IO [Status]
-userTimeline name = fmap parseTimeline . withoutAuth $ doRequest GET "statuses/user_timeline" [("screen_name", name)]
+userTimeline :: String -> [Option] ->  IO [Status]
+userTimeline name opts = fmap parseTimeline . withoutAuth $ doRequest GET "statuses/user_timeline" (("screen_name", name) : toQuery opts)
 
 -- | Get the last 20 updates, without RTs, of the given username, with
 -- authentication. If this throws an @AccessForbidden@ error, their
 -- timeline is protected and you aren't allowed to see it.
-authUserTimeline :: Token -> String -> IO [Status]
-authUserTimeline token name = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/user_timeline" [("screen_name", name)]
+authUserTimeline :: Token -> String -> [Option] -> IO [Status]
+authUserTimeline token name opts = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/user_timeline" (("screen_name", name) : toQuery opts)
 
 -- | Get the last 20 mentions of the authenticating user.
-mentions :: Token -> IO [Status]
-mentions token = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/mentions" []
+mentions :: Token -> [Option] -> IO [Status]
+mentions token opts = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/mentions" (toQuery opts)
 
 -- | Get a @Status@ corresponding to the given id, without authentication.
-getStatus :: String -> IO Status
-getStatus tweetId = withoutAuth $ do
-    rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
+getStatus :: String -> [Option] -> IO Status
+getStatus tweetId opts = withoutAuth $ do
+    rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
     return . handleErrors (makeJSON >=> readJSON) $ rsp
 
 -- | Get a @Status@ corresponding to the given id, with authentication
-authGetStatus :: Token -> String -> IO Status
-authGetStatus token tweetId = runOAuthM token $ do
-    rsp <- doRequest GET ("statuses/show/" ++ tweetId) []
+authGetStatus :: Token -> String -> [Option] -> IO Status
+authGetStatus token tweetId opts = runOAuthM token $ do
+    rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
     return . handleErrors (makeJSON >=> readJSON) $ rsp
     
