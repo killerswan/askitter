@@ -15,7 +15,7 @@
 {-# LANGUAGE DeriveDataTypeable, NoMonomorphismRestriction #-}
 
 module Web.Twitter
-{-       ( updateStatus,
+      ( updateStatus,
          publicTimeline,
          homeTimeline,
          friendsTimeline,
@@ -24,10 +24,12 @@ module Web.Twitter
          mentions,
          getStatus,
          authGetStatus,
+         search,
          Status(..),
-         TwitterException(..)
-       ) where
--} where
+         TwitterException(..),
+         Option(..)
+       )
+ where
 
 import Data.Maybe (fromJust)
 import Web.Twitter.OAuth
@@ -49,12 +51,23 @@ data Status = Status {
     text :: String  -- ^ The content of the status update.
     } deriving (Eq, Show)
 
+(!) = flip valFromObj
+
 instance JSON Status where
-    readJSON (JSObject tweet) = let (!) = flip valFromObj in do
-        userObject <- tweet ! "user"
-        user <- userObject ! "screen_name"
-        text <- tweet ! "text"
-        return Status {user = user, text = text}
+    readJSON (JSObject tweet) = 
+        case timelineParse of
+            Ok x -> timelineParse
+            _ -> searchParse
+      where timelineParse = do
+                userObject <- tweet ! "user"
+                user <- userObject ! "screen_name"
+                text <- tweet ! "text"
+                return Status {user = user, text = text}
+            searchParse = do
+                user <- tweet ! "from_user"
+                text <- tweet ! "text"
+                return Status {user = user, text = text}
+
     showJSON = undefined
 
 -- | A type representing an error that happened while doing something Twitter-related.
@@ -73,7 +86,8 @@ data Option = SinceID StatusID |
               IncludeRTs Bool |
               UserID String |
               ScreenName String |
-              PerPage Integer
+              PerPage Integer |
+              Raw String String
               deriving (Show)
 
 toQuery :: [Option] -> [(String, String)]
@@ -89,6 +103,7 @@ toQuery = map toQuery' where
           UserID id -> ("user_id", id)
           ScreenName name -> ("screen_name", name)
           PerPage perPage -> ("per_page", show perPage)
+          Raw opt val -> (opt, val)
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -171,4 +186,14 @@ authGetStatus :: Token -> String -> [Option] -> IO Status
 authGetStatus token tweetId opts = runOAuthM token $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
     return . handleErrors (makeJSON >=> readJSON) $ rsp
+    
+search :: String -> [Option] -> IO [Status]
+search q opts = withoutAuth $ do
+    let req = (fromJust . parseURL $ "http://search.twitter.com/search.json") { method = GET, qString =  fromList  (("q", q) : toQuery  opts) }
+    rsp <- signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
+    return . handleErrors (makeJSON >=> parseSearch) $ rsp
+    where parseSearch obj = do
+              results <- obj ! "results"
+              mapM readJSON results
+
     
