@@ -77,8 +77,8 @@ data TwitterException
      | OtherError      -- ^ Something else went wrong.
      deriving (Eq, Show, Typeable)
 instance Exception TwitterException
-type StatusID = String
 
+type StatusID = String
 data Option = SinceID StatusID |
               MaxID StatusID |
               Count Integer |
@@ -181,19 +181,16 @@ getStatus tweetId opts = withoutAuth $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
     return . handleErrors (makeJSON >=> readJSON) $ rsp
 
--- | Get a @Status@ corresponding to the given id, with authentication
+-- | Get a @Status@ corresponding to the given id, with authentication.
 authGetStatus :: Token -> String -> [Option] -> IO Status
 authGetStatus token tweetId opts = runOAuthM token $ do
     rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
     return . handleErrors (makeJSON >=> readJSON) $ rsp
-    
+
+-- | Search for the given query.
 search :: String -> [Option] -> IO [Status]
-search q opts = withoutAuth $ do
-    let req = (fromJust . parseURL $ "http://search.twitter.com/search.json") { method = GET, qString =  fromList  (("q", q) : toQuery  opts) }
+search query opts = withoutAuth $ do
+    let req = (fromJust . parseURL $ "http://search.twitter.com/search.json") { method = GET, qString = fromList $ ("q", query) : toQuery opts }
     rsp <- signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
     return . handleErrors (makeJSON >=> parseSearch) $ rsp
-    where parseSearch obj = do
-              results <- obj ! "results"
-              mapM readJSON results
-
-    
+    where parseSearch  = (mapM readJSON =<<) . (! "results") 
