@@ -137,7 +137,7 @@ parseTimeline = handleErrors $ makeJSON >=> readJSON
 -- handling. Someday I'll fix that.
 updateStatus :: Token -> String -> IO ()
 updateStatus token status = runOAuthM token $ do
-    doRequest POST "statuses/update"  []
+    doRequest POST "statuses/update"  [("status", status)]
     return ()
 
 -- | Get the public timeline as a list of statuses.
