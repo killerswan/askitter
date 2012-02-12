@@ -1,5 +1,5 @@
 Name:                askitter
-Version:             0.0.0
+Version:             0.0.1
 Synopsis:            Haskell API for twitter using OAuth
 Homepage:            http://github.com/veinor/askitter
 License:             MIT
