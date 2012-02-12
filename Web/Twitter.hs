@@ -1,4 +1,3 @@
-----------------------------------------------------
 -- |
 -- Module: Web.Twitter
 -- Description: OAuth Twitter bindings
@@ -10,26 +9,38 @@
 -- Twitter bindings that use OAuth instead of basic authentication.
 -- Any function here that returns a value might also throw a NotFound, AccessForbidden, or OtherError
 -- if Twitter gives it the appropriate error (HTTP 404, HTTP 401, or anything else)
------------------------------------------------------
 
 {-# LANGUAGE DeriveDataTypeable, NoMonomorphismRestriction #-}
 
 module Web.Twitter
-      ( updateStatus,
-         publicTimeline,
-         homeTimeline,
-         friendsTimeline,
-         authUserTimeline,
-         userTimeline,
-         mentions,
-         getStatus,
-         authGetStatus,
-         search,
-         Status(..),
-         TwitterException(..),
-         Option(..)
-       )
- where
+  ( 
+    -- * Statuses
+    updateStatus,
+    publicTimeline,
+    homeTimeline,
+    friendsTimeline,
+    authUserTimeline,
+    userTimeline,
+    getStatus,
+    authGetStatus,
+    search,
+    Status(..),
+
+    -- * Favorites
+    Favorite(..),
+    getFavorites,
+    unFavorite,
+
+    -- * Totals
+    AccountTotals(..),
+    getTotals,
+
+    -- * Misc
+    Option(..),
+    TwitterException(..),
+    mentions
+
+  ) where
 
 import Data.Maybe (fromJust)
 import Web.Twitter.OAuth
@@ -47,8 +58,9 @@ import qualified Data.ByteString.Lazy.Char8 as L8
 
 -- | A type representing a single status update, or 'tweet'.
 data Status = Status {
-    user :: String, -- ^ The username of the poster of the status.
-    text :: String  -- ^ The content of the status update.
+    user   :: String, -- ^ The username of the poster of the status.
+    text   :: String, -- ^ The content of the status update.
+    id_str :: String  -- ^ The status id as a string.
     } deriving (Eq, Show)
 
 (!) = flip valFromObj
@@ -56,19 +68,61 @@ data Status = Status {
 instance JSON Status where
     readJSON (JSObject tweet) = 
         case timelineParse of
-            Ok x -> timelineParse
-            _ -> searchParse
+            Ok _ -> timelineParse
+            _    -> searchParse
       where timelineParse = do
                 userObject <- tweet ! "user"
-                user <- userObject ! "screen_name"
-                text <- tweet ! "text"
-                return Status {user = user, text = text}
+                user'       <- userObject ! "screen_name"
+                text'       <- tweet ! "text"
+                id_str'     <- tweet ! "id_str"
+                return Status {user = user', text = text', id_str = id_str'}
             searchParse = do
-                user <- tweet ! "from_user"
-                text <- tweet ! "text"
-                return Status {user = user, text = text}
+                user'    <- tweet ! "from_user"
+                text'    <- tweet ! "text"
+                id_str'  <- tweet ! "id_str"
+                return Status {user = user', text = text', id_str = id_str'}
 
     showJSON = undefined
+
+-- | A type representing a single favorited tweet
+data Favorite = Favorite { fcreated_at :: String
+                           -- THE MOST INSIPID THING: 
+                           -- if i change this to id_str, this will not compile
+                         , fid_str     :: String
+                         } deriving (Eq, Show)
+
+-- [{"id_str"="...",...},{...},...]
+instance JSON Favorite where
+   readJSON (JSObject fav) =
+      do
+         fcreated_at' <- fav ! "created_at"
+         fid_str'     <- fav ! "id_str"
+         return Favorite { fcreated_at = fcreated_at', fid_str = fid_str' }
+
+   showJSON = undefined
+
+-- | A type representing the returned account totals
+data AccountTotals = AccountTotals { friends   :: Integer
+                                   , updates   :: Integer
+                                   , followers :: Integer
+                                   , favorites :: Integer
+                                   } deriving (Eq, Show)
+
+-- { "friends":34534,"followers":430980,... }
+instance JSON AccountTotals where
+   showJSON = undefined
+   readJSON (JSObject tots) =
+      do
+         friends'   <- tots ! "friends"
+         followers' <- tots ! "followers"
+         favorites' <- tots ! "favorites"
+         updates'   <- tots ! "updates"
+         return AccountTotals { friends   = friends'
+                              , updates   = updates'
+                              , followers = followers'
+                              , favorites = favorites'
+                              }
+
 
 -- | A type representing an error that happened while doing something Twitter-related.
 data TwitterException
@@ -94,16 +148,16 @@ toQuery :: [Option] -> [(String, String)]
 toQuery = map toQuery' where
   toQuery' opt =
       case opt of
-          SinceID id ->  ("since_id", id)
-          MaxID id -> ("max_id", id)
-          Count count -> ("count", show count)
-          Page page -> ("page", show page)
-          IncludeRTs True -> ("include_rts", "true")
+          SinceID id       -> ("since_id", id)
+          MaxID id         -> ("max_id", id)
+          Count count      -> ("count", show count)
+          Page page        -> ("page", show page)
+          IncludeRTs True  -> ("include_rts", "true")
           IncludeRTs False -> ("include_rts", "false")
-          UserID id -> ("user_id", id)
-          ScreenName name -> ("screen_name", name)
-          PerPage perPage -> ("per_page", show perPage)
-          Raw opt val -> (opt, val)
+          UserID id        -> ("user_id", id)
+          ScreenName name  -> ("screen_name", name)
+          PerPage perPage  -> ("per_page", show perPage)
+          Raw opt val      -> (opt, val)
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
@@ -123,13 +177,14 @@ withoutAuth = runOAuthM (fromApplication $ Application "" "" OOB)
 handleErrors :: (Response -> Result a) -> Response -> a
 handleErrors parser rsp = case parser rsp of
     Ok parsed -> parsed
-    Error _ -> case status rsp of 
-        401 -> throw AccessForbidden
-        404 -> throw NotFound
-        _   -> throw OtherError
+    Error _   -> case status rsp of 
+                   401 -> throw AccessForbidden
+                   404 -> throw NotFound
+                   x   -> error $ "about to throw OtherError: status is " ++ (shows x "")
+                   --_   -> throw OtherError
 
--- Take a timeline response and turn it into a list of Statuses.
-parseTimeline :: Response -> [Status]
+-- Take a timeline response and turn it into a list of results
+parseTimeline :: JSON a => Response -> [a]
 parseTimeline = handleErrors $ makeJSON >=> readJSON
 
 -- | Update the authenticating user's timeline with the given status
@@ -137,8 +192,20 @@ parseTimeline = handleErrors $ makeJSON >=> readJSON
 -- handling. Someday I'll fix that.
 updateStatus :: Token -> String -> IO ()
 updateStatus token status = runOAuthM token $ do
-    doRequest POST "statuses/update"  [("status", status)]
+    _ <- doRequest POST "statuses/update"  [("status",status)]
     return ()
+
+-- | Unfavorite a tweet
+unFavorite :: String -> Token -> IO [Favorite]
+unFavorite id_str token = fmap (parseTimeline) . runOAuthM token $ doRequest POST ("favorites/destroy/" ++ id_str) []
+
+-- | Get favorites
+getFavorites :: [Option] -> Token -> IO [Favorite]
+getFavorites opts token = fmap (parseTimeline) . runOAuthM token $ doRequest GET "favorites" $ toQuery opts
+
+-- | Get account totals
+getTotals :: Token -> IO AccountTotals
+getTotals token = fmap (handleErrors $ makeJSON >=> readJSON) . runOAuthM token $ doRequest GET "account/totals" []
 
 -- | Get the public timeline as a list of statuses.
 publicTimeline :: IO [Status]
@@ -176,9 +243,9 @@ mentions :: Token -> [Option] -> IO [Status]
 mentions token opts = fmap parseTimeline . runOAuthM token $ doRequest GET "statuses/mentions" (toQuery opts)
 
 -- | Get a @Status@ corresponding to the given id, without authentication.
-getStatus :: String -> [Option] -> IO Status
-getStatus tweetId opts = withoutAuth $ do
-    rsp <- doRequest GET ("statuses/show/" ++ tweetId) (toQuery opts)
+getStatus :: String -> IO Status
+getStatus id_str = withoutAuth $ do
+    rsp <- doRequest GET "statuses/show" [("id", id_str)]
     return . handleErrors (makeJSON >=> readJSON) $ rsp
 
 -- | Get a @Status@ corresponding to the given id, with authentication.
@@ -194,3 +261,5 @@ search query opts = withoutAuth $ do
     rsp <- signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
     return . handleErrors (makeJSON >=> parseSearch) $ rsp
     where parseSearch  = (mapM readJSON =<<) . (! "results") 
+
+
