@@ -19,12 +19,14 @@ import Data.Binary as B
 
 reqUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/request_token"
 accUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/access_token"
+-- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
 authUrl = ("https://api.twitter.com/oauth/authorize?oauth_token=" ++)
             . findWithDefault ("oauth_token","") . oauthParams
 
 request :: SigMethod -> Maybe Realm -> Request -> OAuthMonadT IO Token
 request = \method realm request -> signRq2 method realm request >>= oauthRequest CurlClient
+-- note the call to signRq2 signs a Request
 
 data Consumer = Consumer
     { key :: String

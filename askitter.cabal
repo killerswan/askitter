@@ -11,5 +11,5 @@ Build-type:          Simple
 Cabal-version:       >=1.2
 
 Library
-  Build-depends: base >= 3, bytestring, json, hoauth == 0.3.*, mtl, binary
+  Build-depends: base >= 3, bytestring, curl, json, hoauth == 0.3.*, mtl, binary
   Exposed-modules: Web.Twitter, Web.Twitter.OAuth

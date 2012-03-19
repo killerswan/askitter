@@ -16,6 +16,7 @@ module Web.Twitter
   ( 
     -- * Statuses
     updateStatus,
+    uploadImage,
     publicTimeline,
     homeTimeline,
     friendsTimeline,
@@ -47,6 +48,7 @@ import Web.Twitter.OAuth
 import Control.Monad
 import Control.Applicative ((<$>))
 import Control.Monad.Trans (liftIO, MonadIO)
+import Network.Curl.Post (HttpPost(..), Content(..))
 import Network.OAuth.Consumer
 import Network.OAuth.Http.Request
 import Network.OAuth.Http.Response
@@ -164,10 +166,31 @@ makeJSON = decode . L8.unpack . rspPayload
 
 buildRequest ::  Method -> String -> [(String, String)] -> Request
 buildRequest method part query =
-    (fromJust . parseURL $ "http://api.twitter.com/1/" ++ part ++ ".json") { method = method, qString = fromList query}
+    (fromJust . parseURL $ "https://api.twitter.com/1/" ++ part ++ ".json") { method = method, qString = fromList query}
+   -- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
 doRequest :: Method -> String -> [(String, String)] -> OAuthMonadT IO Response
 doRequest meth part query = signRq2 HMACSHA1 Nothing (buildRequest meth part query) >>= serviceRequest CurlClient
+   -- note the call to signRq2 signs a Request
+
+-- like buildRequest, but including a payload for multipart/form-data
+buildRequestMultipart :: Method -> String -> [(String, String)] -> [HttpPost] -> Request
+buildRequestMultipart method part query payload =
+   (fromJust . parseURL $ url) {
+      method     = method,
+      qString    = fromList query,
+      reqHeaders = fromList [ ("Expect", "") ],
+      reqPayloadMult = payload
+   }
+   where
+      url = "https://upload.twitter.com/1/" ++ part ++ ".json"
+
+-- like doRequest, but including a payload for multipart/form-data
+doRequestMultipart :: Method -> String -> [(String, String)] -> [HttpPost] -> OAuthMonadT IO Response
+doRequestMultipart meth part query payload =
+   signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
+   where
+      req = buildRequestMultipart meth part query payload
 
 withoutAuth :: (Monad m) => OAuthMonadT m a -> m a
 withoutAuth = runOAuthM (fromApplication $ Application "" "" OOB)
@@ -194,6 +217,33 @@ updateStatus :: Token -> String -> IO ()
 updateStatus token status = runOAuthM token $ do
     _ <- doRequest POST "statuses/update"  [("status",status)]
     return ()
+
+-- | Update the authenticating user's timeline with a status and an uploaded image
+uploadImage :: Token -> String -> FilePath -> IO ()
+uploadImage token status imageName = runOAuthM token $ do
+   _ <- doRequestMultipart POST "statuses/update_with_media" [] payload
+   return ()
+
+   where
+      -- this relies on libcurl's HttpPost and Content types
+      -- we may want to change this
+      payload :: [HttpPost]
+      payload =
+         [ HttpPost
+            { postName = "status"
+            , contentType = Just "form-data"
+            , content = ContentString status
+            , showName = Nothing
+            , extraHeaders = []
+            }
+         , HttpPost
+            { postName = "media[]"
+            , contentType = Just "Content"
+            , content = ContentFile imageName
+            , showName = Nothing
+            , extraHeaders = []
+            }
+         ]
 
 -- | Unfavorite a tweet
 unFavorite :: String -> Token -> IO [Favorite]
@@ -257,7 +307,7 @@ authGetStatus token tweetId opts = runOAuthM token $ do
 -- | Search for the given query.
 search :: String -> [Option] -> IO [Status]
 search query opts = withoutAuth $ do
-    let req = (fromJust . parseURL $ "http://search.twitter.com/search.json") { method = GET, qString = fromList $ ("q", query) : toQuery opts }
+    let req = (fromJust . parseURL $ "https://search.twitter.com/search.json") { method = GET, qString = fromList $ ("q", query) : toQuery opts }
     rsp <- signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
     return . handleErrors (makeJSON >=> parseSearch) $ rsp
     where parseSearch  = (mapM readJSON =<<) . (! "results") 
