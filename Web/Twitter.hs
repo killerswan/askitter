@@ -48,7 +48,6 @@ import Web.Twitter.OAuth
 import Control.Monad
 import Control.Applicative ((<$>))
 import Control.Monad.Trans (liftIO, MonadIO)
-import Network.Curl.Post (HttpPost(..), Content(..))
 import Network.OAuth.Consumer
 import Network.OAuth.Http.Request
 import Network.OAuth.Http.Response
@@ -174,19 +173,19 @@ doRequest meth part query = signRq2 HMACSHA1 Nothing (buildRequest meth part que
    -- note the call to signRq2 signs a Request
 
 -- like buildRequest, but including a payload for multipart/form-data
-buildRequestMultipart :: Method -> String -> [(String, String)] -> [HttpPost] -> Request
+buildRequestMultipart :: Method -> String -> [(String, String)] -> [FormDataPart] -> Request
 buildRequestMultipart method part query payload =
    (fromJust . parseURL $ url) {
       method     = method,
       qString    = fromList query,
       reqHeaders = fromList [ ("Expect", "") ],
-      reqPayloadMult = payload
+      multipartPayload = payload
    }
    where
       url = "https://upload.twitter.com/1/" ++ part ++ ".json"
 
 -- like doRequest, but including a payload for multipart/form-data
-doRequestMultipart :: Method -> String -> [(String, String)] -> [HttpPost] -> OAuthMonadT IO Response
+doRequestMultipart :: Method -> String -> [(String, String)] -> [FormDataPart] -> OAuthMonadT IO Response
 doRequestMultipart meth part query payload =
    signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
    where
@@ -225,18 +224,16 @@ uploadImage token status imageName = runOAuthM token $ do
    return ()
 
    where
-      -- this relies on libcurl's HttpPost and Content types
-      -- we may want to change this
-      payload :: [HttpPost]
+      payload :: [FormDataPart]
       payload =
-         [ HttpPost
+         [ FormDataPart
             { postName = "status"
             , contentType = Just "form-data"
             , content = ContentString status
             , showName = Nothing
             , extraHeaders = []
             }
-         , HttpPost
+         , FormDataPart
             { postName = "media[]"
             , contentType = Just "Content"
             , content = ContentFile imageName
