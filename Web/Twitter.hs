@@ -16,7 +16,6 @@ module Web.Twitter
   ( 
     -- * Statuses
     updateStatus,
-    uploadImage,
     publicTimeline,
     homeTimeline,
     friendsTimeline,
@@ -26,6 +25,11 @@ module Web.Twitter
     authGetStatus,
     search,
     Status(..),
+
+    -- * Media
+    uploadImage,
+    uploadImageWithAttr,
+    ImageAttr(..),
 
     -- * Favorites
     Favorite(..),
@@ -219,20 +223,48 @@ updateStatus token status = runOAuthM token $ do
 
 -- | Update the authenticating user's timeline with a status and an uploaded image
 uploadImage :: Token -> String -> FilePath -> IO ()
-uploadImage token status imageName = runOAuthM token $ do
-   _ <- doRequestMultipart POST "statuses/update_with_media" [] payload
-   return ()
+uploadImage token status imageName =
+   uploadImageWithAttr token status imageName []
+
+-- | Optional attributes for an image upload
+data ImageAttr = PossiblySensitive     -- note that this image is risqué
+               | ReplyTo String        -- the tweet this is in reply to
+               | LatLon Double Double  -- a latitude and longitude
+               | PlaceID String        -- a location code retrieved from geo/reverse_geocode
+               | DisplayCoords         -- tell Twitter to display the location
+
+-- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
+uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO ()
+uploadImageWithAttr token status imageName attrs =
+   runOAuthM token $ do
+      _ <- doRequestMultipart POST "statuses/update_with_media" [] payload
+      return ()
 
    where
-      payload :: [FormDataPart]
-      payload =
-         [ FormDataPart
-            { postName = "status"
+      -- make one FormDataPart
+      toPart :: String -> String -> FormDataPart
+      toPart name value =
+         FormDataPart
+            { postName = name
             , contentType = Just "form-data"
-            , content = ContentString status
+            , content = ContentString value
             , showName = Nothing
             , extraHeaders = []
             }
+
+      -- make any ImageAttr into FormDataPart(s)
+      processAttr :: ImageAttr -> [FormDataPart]
+      processAttr PossiblySensitive = [toPart "possibly_sensitive" "true"]  -- assume Twitter default is "false"
+      processAttr (ReplyTo id)      = [toPart "in_reply_to_status_id" id]
+      processAttr (LatLon lat lon)  = [toPart "lat" (show lat), toPart "long" (show lon)]
+      processAttr (PlaceID place)   = [toPart "place_id" place]
+      processAttr DisplayCoords     = [toPart "display_coordinates" "true"] -- assume Twitter default is "false"
+
+      -- collect our set of parts
+      -- allowing duplicates, which Twitter may or may not reject
+      payload :: [FormDataPart]
+      payload =
+         [ toPart "status" status
          , FormDataPart
             { postName = "media[]"
             , contentType = Just "Content"
@@ -241,6 +273,8 @@ uploadImage token status imageName = runOAuthM token $ do
             , extraHeaders = []
             }
          ]
+         ++
+         (processAttr =<< attrs)
 
 -- | Unfavorite a tweet
 unFavorite :: String -> Token -> IO [Favorite]
