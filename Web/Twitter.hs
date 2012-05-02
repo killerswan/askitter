@@ -130,10 +130,21 @@ instance JSON AccountTotals where
 
 
 -- | A type representing an error that happened while doing something Twitter-related.
+-- (See https://dev.twitter.com/docs/error-codes-responses for the list.)
 data TwitterException
-     = NotFound        -- ^ The requested object was not found.
-     | AccessForbidden -- ^ You do not have permission to access the requested entity.
-     | OtherError      -- ^ Something else went wrong.
+     = NotModified         -- ^ (304)
+     | BadRequest          -- ^ (400)
+     | AccessForbidden     -- ^ (401) You do not have permission to access the requested entity.
+  -- | Unauthorized        -- ^ (401)
+     | NotFound            -- ^ (404) The requested object was not found.
+     | NotAcceptable       -- ^ (406)
+     | ExpectationFailed   -- ^ (417)
+     | EnhanceYourCalm     -- ^ (420)
+     | InternalServerError -- ^ (500)
+     | BadGateway          -- ^ (502)
+     | ServiceUnavailable  -- ^ (503)
+     | OtherError Int      -- ^
+  -- | OtherError          -- ^       Something else went wrong.
      deriving (Eq, Show, Typeable)
 instance Exception TwitterException
 
@@ -204,14 +215,27 @@ handleErrors :: (Response -> Result a) -> Response -> a
 handleErrors parser rsp = case parser rsp of
     Ok parsed -> parsed
     Error _   -> case status rsp of 
+                   304 -> throw NotModified
+                   400 -> throw BadRequest
                    401 -> throw AccessForbidden
+                -- 401 -> throw Unauthorized
                    404 -> throw NotFound
-                   x   -> error $ "about to throw OtherError: status is " ++ (shows x "")
+                   406 -> throw NotAcceptable
+                   417 -> throw ExpectationFailed
+                   420 -> throw EnhanceYourCalm
+                   500 -> throw InternalServerError
+                   502 -> throw BadGateway
+                   503 -> throw ServiceUnavailable
+                   x   -> throw $ OtherError x
+                   --x   -> error $ "about to throw OtherError: status is " ++ (shows x "")
                    --_   -> throw OtherError
 
 -- Take a timeline response and turn it into a list of results
 parseTimeline :: JSON a => Response -> [a]
 parseTimeline = handleErrors $ makeJSON >=> readJSON
+
+parseOne :: JSON a => Response -> a
+parseOne = handleErrors $ makeJSON >=> readJSON
 
 -- | Update the authenticating user's timeline with the given status
 -- string. Returns IO () always, but doesn't do any exception
@@ -222,7 +246,7 @@ updateStatus token status = runOAuthM token $ do
     return ()
 
 -- | Update the authenticating user's timeline with a status and an uploaded image
-uploadImage :: Token -> String -> FilePath -> IO ()
+uploadImage :: Token -> String -> FilePath -> IO Status
 uploadImage token status imageName =
    uploadImageWithAttr token status imageName []
 
@@ -234,11 +258,11 @@ data ImageAttr = PossiblySensitive     -- note that this image is risqué
                | DisplayCoords         -- tell Twitter to display the location
 
 -- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
-uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO ()
+uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO Status
 uploadImageWithAttr token status imageName attrs =
    runOAuthM token $ do
-      _ <- doRequestMultipart POST "statuses/update_with_media" [] payload
-      return ()
+      rsp <- doRequestMultipart POST "statuses/update_with_media" [] payload
+      return . parseOne $ rsp
 
    where
       -- make one FormDataPart
