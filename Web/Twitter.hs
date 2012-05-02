@@ -245,6 +245,25 @@ updateStatus token status = runOAuthM token $ do
     _ <- doRequest POST "statuses/update"  [("status",status)]
     return ()
 
+data StatusAttr = ReplyTo String
+                | LatLon Double Double
+                | PlaceID String
+                | DisplayCoords
+                deriving (Eq, Show)
+
+updateStatusWithAttr :: Token -> String -> [StatusAttr] -> IO Status
+updateStatusWithAttr token status attrs =
+   runOAuthM token . return . parseOne $ doRequest POST "statuses/update" query
+   where
+      processAttr :: StatusAttr -> [(String, String)]
+      processAttr (ReplyTo id)     = [("in_reply_to_status_id", id)]
+      processAttr (LatLon lat lon) = [("lat", show lat), ("long", show lon)]
+      processAttr (PlaceID place)  = [("place_id" place)]
+      processAttr DisplayCoords    = [("display_coordinates", "true")] -- assume Twitter default is "false"
+
+      query = ("status", status) : (processAttr =<< attrs)
+
+
 -- | Update the authenticating user's timeline with a status and an uploaded image
 uploadImage :: Token -> String -> FilePath -> IO Status
 uploadImage token status imageName =
@@ -256,6 +275,7 @@ data ImageAttr = PossiblySensitive     -- note that this image is risqué
                | LatLon Double Double  -- a latitude and longitude
                | PlaceID String        -- a location code retrieved from geo/reverse_geocode
                | DisplayCoords         -- tell Twitter to display the location
+               deriving (Eq, Show)
 
 -- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
 uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO Status
