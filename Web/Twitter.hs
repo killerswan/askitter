@@ -16,6 +16,8 @@ module Web.Twitter
   ( 
     -- * Statuses
     updateStatus,
+    updateStatusWithAttr,
+    StatusAttr(..),
     publicTimeline,
     homeTimeline,
     friendsTimeline,
@@ -240,26 +242,28 @@ parseOne = handleErrors $ makeJSON >=> readJSON
 -- | Update the authenticating user's timeline with the given status
 -- string. Returns IO () always, but doesn't do any exception
 -- handling. Someday I'll fix that.
-updateStatus :: Token -> String -> IO ()
-updateStatus token status = runOAuthM token $ do
-    _ <- doRequest POST "statuses/update"  [("status",status)]
-    return ()
+updateStatus :: Token -> String -> IO Status
+updateStatus token status =
+   updateStatusWithAttr token status []
 
-data StatusAttr = ReplyTo String
-                | LatLon Double Double
-                | PlaceID String
-                | DisplayCoords
+data StatusAttr = StatusReplyTo String
+                | StatusLatLon Double Double
+                | StatusPlaceID String
+                | StatusDisplayCoords
                 deriving (Eq, Show)
 
 updateStatusWithAttr :: Token -> String -> [StatusAttr] -> IO Status
 updateStatusWithAttr token status attrs =
-   runOAuthM token . return . parseOne $ doRequest POST "statuses/update" query
+   runOAuthM token $ do
+      rsp <- doRequest POST "statuses/update" query
+      return . parseOne $ rsp
+
    where
       processAttr :: StatusAttr -> [(String, String)]
-      processAttr (ReplyTo id)     = [("in_reply_to_status_id", id)]
-      processAttr (LatLon lat lon) = [("lat", show lat), ("long", show lon)]
-      processAttr (PlaceID place)  = [("place_id" place)]
-      processAttr DisplayCoords    = [("display_coordinates", "true")] -- assume Twitter default is "false"
+      processAttr (StatusReplyTo id)     = [("in_reply_to_status_id", id)]
+      processAttr (StatusLatLon lat lon) = [("lat", show lat), ("long", show lon)]
+      processAttr (StatusPlaceID place)  = [("place_id", place)]
+      processAttr StatusDisplayCoords    = [("display_coordinates", "true")] -- assume Twitter default is "false"
 
       query = ("status", status) : (processAttr =<< attrs)
 
@@ -270,11 +274,11 @@ uploadImage token status imageName =
    uploadImageWithAttr token status imageName []
 
 -- | Optional attributes for an image upload
-data ImageAttr = PossiblySensitive     -- note that this image is risqué
-               | ReplyTo String        -- the tweet this is in reply to
-               | LatLon Double Double  -- a latitude and longitude
-               | PlaceID String        -- a location code retrieved from geo/reverse_geocode
-               | DisplayCoords         -- tell Twitter to display the location
+data ImageAttr = ImagePossiblySensitive     -- note that this image is risqué
+               | ImageReplyTo String        -- the tweet this is in reply to
+               | ImageLatLon Double Double  -- a latitude and longitude
+               | ImagePlaceID String        -- a location code retrieved from geo/reverse_geocode
+               | ImageDisplayCoords         -- tell Twitter to display the location
                deriving (Eq, Show)
 
 -- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
@@ -298,11 +302,11 @@ uploadImageWithAttr token status imageName attrs =
 
       -- make any ImageAttr into FormDataPart(s)
       processAttr :: ImageAttr -> [FormDataPart]
-      processAttr PossiblySensitive = [toPart "possibly_sensitive" "true"]  -- assume Twitter default is "false"
-      processAttr (ReplyTo id)      = [toPart "in_reply_to_status_id" id]
-      processAttr (LatLon lat lon)  = [toPart "lat" (show lat), toPart "long" (show lon)]
-      processAttr (PlaceID place)   = [toPart "place_id" place]
-      processAttr DisplayCoords     = [toPart "display_coordinates" "true"] -- assume Twitter default is "false"
+      processAttr ImagePossiblySensitive = [toPart "possibly_sensitive" "true"]  -- assume Twitter default is "false"
+      processAttr (ImageReplyTo id)      = [toPart "in_reply_to_status_id" id]
+      processAttr (ImageLatLon lat lon)  = [toPart "lat" (show lat), toPart "long" (show lon)]
+      processAttr (ImagePlaceID place)   = [toPart "place_id" place]
+      processAttr ImageDisplayCoords     = [toPart "display_coordinates" "true"] -- assume Twitter default is "false"
 
       -- collect our set of parts
       -- allowing duplicates, which Twitter may or may not reject
