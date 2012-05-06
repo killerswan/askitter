@@ -16,6 +16,8 @@ module Web.Twitter
   ( 
     -- * Statuses
     updateStatus,
+    updateStatusWithAttr,
+    StatusAttr(..),
     publicTimeline,
     homeTimeline,
     friendsTimeline,
@@ -25,6 +27,11 @@ module Web.Twitter
     authGetStatus,
     search,
     Status(..),
+
+    -- * Media
+    uploadImage,
+    uploadImageWithAttr,
+    ImageAttr(..),
 
     -- * Favorites
     Favorite(..),
@@ -125,10 +132,21 @@ instance JSON AccountTotals where
 
 
 -- | A type representing an error that happened while doing something Twitter-related.
+-- (See https://dev.twitter.com/docs/error-codes-responses for the list.)
 data TwitterException
-     = NotFound        -- ^ The requested object was not found.
-     | AccessForbidden -- ^ You do not have permission to access the requested entity.
-     | OtherError      -- ^ Something else went wrong.
+     = NotModified         -- ^ (304)
+     | BadRequest          -- ^ (400)
+     | AccessForbidden     -- ^ (401) You do not have permission to access the requested entity.
+  -- | Unauthorized        -- ^ (401)
+     | NotFound            -- ^ (404) The requested object was not found.
+     | NotAcceptable       -- ^ (406)
+     | ExpectationFailed   -- ^ (417)
+     | EnhanceYourCalm     -- ^ (420)
+     | InternalServerError -- ^ (500)
+     | BadGateway          -- ^ (502)
+     | ServiceUnavailable  -- ^ (503)
+     | OtherError Int      -- ^
+  -- | OtherError          -- ^       Something else went wrong.
      deriving (Eq, Show, Typeable)
 instance Exception TwitterException
 
@@ -164,10 +182,31 @@ makeJSON = decode . L8.unpack . rspPayload
 
 buildRequest ::  Method -> String -> [(String, String)] -> Request
 buildRequest method part query =
-    (fromJust . parseURL $ "http://api.twitter.com/1/" ++ part ++ ".json") { method = method, qString = fromList query}
+    (fromJust . parseURL $ "https://api.twitter.com/1/" ++ part ++ ".json") { method = method, qString = fromList query}
+   -- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
 doRequest :: Method -> String -> [(String, String)] -> OAuthMonadT IO Response
 doRequest meth part query = signRq2 HMACSHA1 Nothing (buildRequest meth part query) >>= serviceRequest CurlClient
+   -- note the call to signRq2 signs a Request
+
+-- like buildRequest, but including a payload for multipart/form-data
+buildRequestMultipart :: Method -> String -> [(String, String)] -> [FormDataPart] -> Request
+buildRequestMultipart method part query payload =
+   (fromJust . parseURL $ url) {
+      method     = method,
+      qString    = fromList query,
+      reqHeaders = fromList [ ("Expect", "") ],
+      multipartPayload = payload
+   }
+   where
+      url = "https://upload.twitter.com/1/" ++ part ++ ".json"
+
+-- like doRequest, but including a payload for multipart/form-data
+doRequestMultipart :: Method -> String -> [(String, String)] -> [FormDataPart] -> OAuthMonadT IO Response
+doRequestMultipart meth part query payload =
+   signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
+   where
+      req = buildRequestMultipart meth part query payload
 
 withoutAuth :: (Monad m) => OAuthMonadT m a -> m a
 withoutAuth = runOAuthM (fromApplication $ Application "" "" OOB)
@@ -178,22 +217,112 @@ handleErrors :: (Response -> Result a) -> Response -> a
 handleErrors parser rsp = case parser rsp of
     Ok parsed -> parsed
     Error _   -> case status rsp of 
+                   304 -> throw NotModified
+                   400 -> throw BadRequest
                    401 -> throw AccessForbidden
+                -- 401 -> throw Unauthorized
                    404 -> throw NotFound
-                   x   -> error $ "about to throw OtherError: status is " ++ (shows x "")
+                   406 -> throw NotAcceptable
+                   417 -> throw ExpectationFailed
+                   420 -> throw EnhanceYourCalm
+                   500 -> throw InternalServerError
+                   502 -> throw BadGateway
+                   503 -> throw ServiceUnavailable
+                   x   -> throw $ OtherError x
+                   --x   -> error $ "about to throw OtherError: status is " ++ (shows x "")
                    --_   -> throw OtherError
 
 -- Take a timeline response and turn it into a list of results
 parseTimeline :: JSON a => Response -> [a]
 parseTimeline = handleErrors $ makeJSON >=> readJSON
 
+parseOne :: JSON a => Response -> a
+parseOne = handleErrors $ makeJSON >=> readJSON
+
 -- | Update the authenticating user's timeline with the given status
 -- string. Returns IO () always, but doesn't do any exception
 -- handling. Someday I'll fix that.
-updateStatus :: Token -> String -> IO ()
-updateStatus token status = runOAuthM token $ do
-    _ <- doRequest POST "statuses/update"  [("status",status)]
-    return ()
+updateStatus :: Token -> String -> IO Status
+updateStatus token status =
+   updateStatusWithAttr token status []
+
+data StatusAttr = StatusReplyTo String
+                | StatusLatLon Double Double
+                | StatusPlaceID String
+                | StatusDisplayCoords
+                deriving (Eq, Show)
+
+updateStatusWithAttr :: Token -> String -> [StatusAttr] -> IO Status
+updateStatusWithAttr token status attrs =
+   runOAuthM token $ do
+      rsp <- doRequest POST "statuses/update" query
+      return . parseOne $ rsp
+
+   where
+      processAttr :: StatusAttr -> [(String, String)]
+      processAttr (StatusReplyTo id)     = [("in_reply_to_status_id", id)]
+      processAttr (StatusLatLon lat lon) = [("lat", show lat), ("long", show lon)]
+      processAttr (StatusPlaceID place)  = [("place_id", place)]
+      processAttr StatusDisplayCoords    = [("display_coordinates", "true")] -- assume Twitter default is "false"
+
+      query = ("status", status) : (processAttr =<< attrs)
+
+
+-- | Update the authenticating user's timeline with a status and an uploaded image
+uploadImage :: Token -> String -> FilePath -> IO Status
+uploadImage token status imageName =
+   uploadImageWithAttr token status imageName []
+
+-- | Optional attributes for an image upload
+data ImageAttr = ImagePossiblySensitive     -- note that this image is risqué
+               | ImageReplyTo String        -- the tweet this is in reply to
+               | ImageLatLon Double Double  -- a latitude and longitude
+               | ImagePlaceID String        -- a location code retrieved from geo/reverse_geocode
+               | ImageDisplayCoords         -- tell Twitter to display the location
+               deriving (Eq, Show)
+
+-- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
+uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO Status
+uploadImageWithAttr token status imageName attrs =
+   runOAuthM token $ do
+      rsp <- doRequestMultipart POST "statuses/update_with_media" [] payload
+      return . parseOne $ rsp
+
+   where
+      -- make one FormDataPart
+      toPart :: String -> String -> FormDataPart
+      toPart name value =
+         FormDataPart
+            { postName = name
+            , contentType = Just "form-data"
+            , content = ContentString value
+            , showName = Nothing
+            , extraHeaders = []
+            }
+
+      -- make any ImageAttr into FormDataPart(s)
+      processAttr :: ImageAttr -> [FormDataPart]
+      processAttr ImagePossiblySensitive = [toPart "possibly_sensitive" "true"]  -- assume Twitter default is "false"
+      processAttr (ImageReplyTo id)      = [toPart "in_reply_to_status_id" id]
+      processAttr (ImageLatLon lat lon)  = [toPart "lat" (show lat), toPart "long" (show lon)]
+      processAttr (ImagePlaceID place)   = [toPart "place_id" place]
+      processAttr ImageDisplayCoords     = [toPart "display_coordinates" "true"] -- assume Twitter default is "false"
+
+      -- collect our set of parts
+      -- allowing duplicates, which Twitter may or may not reject
+      payload :: [FormDataPart]
+      payload =
+         [ toPart "status" status
+         , FormDataPart
+            { postName = "media[]"
+            , contentType = Just "Content"
+            , content = ContentFile imageName
+            , showName = Nothing
+            , extraHeaders = []
+            }
+         ]
+         ++
+         (processAttr =<< attrs)
 
 -- | Unfavorite a tweet
 unFavorite :: String -> Token -> IO [Favorite]
@@ -257,7 +386,7 @@ authGetStatus token tweetId opts = runOAuthM token $ do
 -- | Search for the given query.
 search :: String -> [Option] -> IO [Status]
 search query opts = withoutAuth $ do
-    let req = (fromJust . parseURL $ "http://search.twitter.com/search.json") { method = GET, qString = fromList $ ("q", query) : toQuery opts }
+    let req = (fromJust . parseURL $ "https://search.twitter.com/search.json") { method = GET, qString = fromList $ ("q", query) : toQuery opts }
     rsp <- signRq2 HMACSHA1 Nothing req >>= serviceRequest CurlClient
     return . handleErrors (makeJSON >=> parseSearch) $ rsp
     where parseSearch  = (mapM readJSON =<<) . (! "results") 
