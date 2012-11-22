@@ -1,11 +1,11 @@
 Name:                askitter
-Version:             0.0.1
-Synopsis:            Haskell API for twitter using OAuth
-Homepage:            http://github.com/veinor/askitter
+Version:             0.0.2
+Synopsis:            Twitter API bindings in Haskell
+Homepage:            https://github.com/killerswan/askitter/
 License:             MIT
 License-file:        LICENSE
-Author:              Patrick Hurst
-Maintainer:          phurst@mit.edu
+Author:              Patrick Hurst <phurst@mit.edu>
+Maintainer:          Kevin Cantu <me@kevincantu.org>
 Category:            Web
 Build-type:          Simple
 Cabal-version:       >=1.2

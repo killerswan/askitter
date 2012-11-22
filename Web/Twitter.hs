@@ -1,8 +1,8 @@
 -- |
 -- Module: Web.Twitter
--- Description: OAuth Twitter bindings
+-- Description: Twitter API bindings
 -- License: MIT
--- Maintainer: Patrick Hurst <phurst@mit.edu>
+-- Maintainer: Kevin Cantu <me@kevincantu.org>
 -- Stability: experimental
 -- Portability: portable
 --
