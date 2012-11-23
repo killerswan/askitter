@@ -1,3 +1,11 @@
+-- |
+-- Module: Web.Twitter.OAuth
+--
+-- Maintainer: Kevin Cantu <me@kevincantu.org>
+-- Stability: experimental
+--
+-- Wrappers using hoauth and libcurl for use with the Twitter API.
+
 module Web.Twitter.OAuth
        ( getAuthenticateURL
        , makeToken
@@ -16,16 +24,19 @@ import Network.OAuth.Http.CurlHttpClient
 import qualified Data.ByteString.Lazy as L
 import Data.Binary as B
 
-
+reqUrl :: Request
 reqUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/request_token"
+
+accUrl :: Request
 accUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/access_token"
 -- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
+authUrl :: Token -> [Char]
 authUrl = ("https://api.twitter.com/oauth/authorize?oauth_token=" ++)
             . findWithDefault ("oauth_token","") . oauthParams
 
 request :: SigMethod -> Maybe Realm -> Request -> OAuthMonadT IO Token
-request = \method realm request -> signRq2 method realm request >>= oauthRequest CurlClient
+request meth realm req = signRq2 meth realm req >>= oauthRequest CurlClient
 -- note the call to signRq2 signs a Request
 
 data Consumer = Consumer
@@ -36,14 +47,14 @@ data Consumer = Consumer
 getAuthenticateURL :: Consumer -> OAuthMonadT IO String
 getAuthenticateURL consumer = do
     ignite $ Application (key consumer) (secret consumer) OOB 
-    request HMACSHA1 Nothing reqUrl
+    _ <- request HMACSHA1 Nothing reqUrl
     authUrl <$> getToken
 
 makeToken :: String -> OAuthMonadT IO Token
 makeToken answer = do
     token <- getToken
     putToken $ injectOAuthVerifier answer token
-    request HMACSHA1 Nothing accUrl
+    _ <- request HMACSHA1 Nothing accUrl
     getToken
 
 authenticate :: Consumer -> IO Token

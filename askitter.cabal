@@ -1,6 +1,12 @@
 Name:                askitter
 Version:             0.0.2
-Synopsis:            Twitter API bindings in Haskell
+Synopsis:            a Twitter library
+Description:
+   .
+   This library provides bindings to the Twitter API.
+   .
+   Contributions and optimizations are welcome!
+   .
 Homepage:            https://github.com/killerswan/askitter/
 License:             MIT
 License-file:        LICENSE

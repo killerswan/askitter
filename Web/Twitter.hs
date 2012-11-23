@@ -1,12 +1,11 @@
 -- |
 -- Module: Web.Twitter
--- Description: Twitter API bindings
--- License: MIT
+--
 -- Maintainer: Kevin Cantu <me@kevincantu.org>
 -- Stability: experimental
--- Portability: portable
 --
--- Twitter bindings that use OAuth instead of basic authentication.
+-- A Haskell library for the Twitter API.
+--
 -- Any function here that returns a value might also throw a NotFound, AccessForbidden, or OtherError
 -- if Twitter gives it the appropriate error (HTTP 404, HTTP 401, or anything else)
 
@@ -49,11 +48,10 @@ module Web.Twitter
 
   ) where
 
+import Prelude hiding (id)
 import Data.Maybe (fromJust)
-import Web.Twitter.OAuth
+import Web.Twitter.OAuth ()
 import Control.Monad
-import Control.Applicative ((<$>))
-import Control.Monad.Trans (liftIO, MonadIO)
 import Network.OAuth.Consumer
 import Network.OAuth.Http.Request
 import Network.OAuth.Http.Response
@@ -70,9 +68,12 @@ data Status = Status {
     id_str :: String  -- ^ The status id as a string.
     } deriving (Eq, Show)
 
+(!) :: JSON a => JSObject JSValue -> String -> Result a
 (!) = flip valFromObj
 
 instance JSON Status where
+    showJSON = undefined
+
     readJSON (JSObject tweet) = 
         case timelineParse of
             Ok _ -> timelineParse
@@ -89,7 +90,7 @@ instance JSON Status where
                 id_str'  <- tweet ! "id_str"
                 return Status {user = user', text = text', id_str = id_str'}
 
-    showJSON = undefined
+    readJSON _ = error "Oops, no statuses retrieved"
 
 -- | A type representing a single favorited tweet
 data Favorite = Favorite { fcreated_at :: String
@@ -100,13 +101,16 @@ data Favorite = Favorite { fcreated_at :: String
 
 -- [{"id_str"="...",...},{...},...]
 instance JSON Favorite where
+   showJSON = undefined
+
    readJSON (JSObject fav) =
       do
          fcreated_at' <- fav ! "created_at"
          fid_str'     <- fav ! "id_str"
          return Favorite { fcreated_at = fcreated_at', fid_str = fid_str' }
 
-   showJSON = undefined
+   readJSON _ = error "Oops, no favorites retrieved"
+
 
 -- | A type representing the returned account totals
 data AccountTotals = AccountTotals { friends   :: Integer
@@ -118,6 +122,7 @@ data AccountTotals = AccountTotals { friends   :: Integer
 -- { "friends":34534,"followers":430980,... }
 instance JSON AccountTotals where
    showJSON = undefined
+
    readJSON (JSObject tots) =
       do
          friends'   <- tots ! "friends"
@@ -129,6 +134,9 @@ instance JSON AccountTotals where
                               , followers = followers'
                               , favorites = favorites'
                               }
+
+   readJSON _ = error "Oops, no account totals retrieved"
+
 
 
 -- | A type representing an error that happened while doing something Twitter-related.
@@ -151,16 +159,17 @@ data TwitterException
 instance Exception TwitterException
 
 type StatusID = String
-data Option = SinceID StatusID |
-              MaxID StatusID |
-              Count Integer |
-              Page Integer |
-              IncludeRTs Bool |
-              UserID String |
-              ScreenName String |
-              PerPage Integer |
-              Raw String String
-              deriving (Show)
+
+data Option = SinceID StatusID
+            | MaxID StatusID
+            | Count Integer
+            | Page Integer
+            | IncludeRTs Bool
+            | UserID String
+            | ScreenName String
+            | PerPage Integer
+            | Raw String String
+            deriving (Show)
 
 toQuery :: [Option] -> [(String, String)]
 toQuery = map toQuery' where
@@ -175,14 +184,14 @@ toQuery = map toQuery' where
           UserID id        -> ("user_id", id)
           ScreenName name  -> ("screen_name", name)
           PerPage perPage  -> ("per_page", show perPage)
-          Raw opt val      -> (opt, val)
+          Raw op val       -> (op, val)
 
 makeJSON :: (JSON a) => Response -> Result a
 makeJSON = decode . L8.unpack . rspPayload
 
 buildRequest ::  Method -> String -> [(String, String)] -> Request
-buildRequest method part query =
-    (fromJust . parseURL $ "https://api.twitter.com/1/" ++ part ++ ".json") { method = method, qString = fromList query}
+buildRequest meth part query =
+    (fromJust . parseURL $ "https://api.twitter.com/1/" ++ part ++ ".json") { method = meth, qString = fromList query}
    -- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
 doRequest :: Method -> String -> [(String, String)] -> OAuthMonadT IO Response
@@ -191,9 +200,9 @@ doRequest meth part query = signRq2 HMACSHA1 Nothing (buildRequest meth part que
 
 -- like buildRequest, but including a payload for multipart/form-data
 buildRequestMultipart :: Method -> String -> [(String, String)] -> [FormDataPart] -> Request
-buildRequestMultipart method part query payload =
+buildRequestMultipart method' part query payload =
    (fromJust . parseURL $ url) {
-      method     = method,
+      method     = method',
       qString    = fromList query,
       reqHeaders = fromList [ ("Expect", "") ],
       multipartPayload = payload
@@ -243,8 +252,8 @@ parseOne = handleErrors $ makeJSON >=> readJSON
 -- string. Returns IO () always, but doesn't do any exception
 -- handling. Someday I'll fix that.
 updateStatus :: Token -> String -> IO Status
-updateStatus token status =
-   updateStatusWithAttr token status []
+updateStatus token status' =
+   updateStatusWithAttr token status' []
 
 data StatusAttr = StatusReplyTo String
                 | StatusLatLon Double Double
@@ -253,7 +262,7 @@ data StatusAttr = StatusReplyTo String
                 deriving (Eq, Show)
 
 updateStatusWithAttr :: Token -> String -> [StatusAttr] -> IO Status
-updateStatusWithAttr token status attrs =
+updateStatusWithAttr token status' attrs =
    runOAuthM token $ do
       rsp <- doRequest POST "statuses/update" query
       return . parseOne $ rsp
@@ -265,13 +274,13 @@ updateStatusWithAttr token status attrs =
       processAttr (StatusPlaceID place)  = [("place_id", place)]
       processAttr StatusDisplayCoords    = [("display_coordinates", "true")] -- assume Twitter default is "false"
 
-      query = ("status", status) : (processAttr =<< attrs)
+      query = ("status", status') : (processAttr =<< attrs)
 
 
 -- | Update the authenticating user's timeline with a status and an uploaded image
 uploadImage :: Token -> String -> FilePath -> IO Status
-uploadImage token status imageName =
-   uploadImageWithAttr token status imageName []
+uploadImage token status' imageName =
+   uploadImageWithAttr token status' imageName []
 
 -- | Optional attributes for an image upload
 data ImageAttr = ImagePossiblySensitive     -- note that this image is risqué
@@ -283,7 +292,7 @@ data ImageAttr = ImagePossiblySensitive     -- note that this image is risqué
 
 -- | Like `uploadImage`, but supporting the optional attributes in ImageAttr
 uploadImageWithAttr :: Token -> String -> FilePath -> [ImageAttr] -> IO Status
-uploadImageWithAttr token status imageName attrs =
+uploadImageWithAttr token status' imageName attrs =
    runOAuthM token $ do
       rsp <- doRequestMultipart POST "statuses/update_with_media" [] payload
       return . parseOne $ rsp
@@ -312,7 +321,7 @@ uploadImageWithAttr token status imageName attrs =
       -- allowing duplicates, which Twitter may or may not reject
       payload :: [FormDataPart]
       payload =
-         [ toPart "status" status
+         [ toPart "status" status'
          , FormDataPart
             { postName = "media[]"
             , contentType = Just "Content"
@@ -326,7 +335,7 @@ uploadImageWithAttr token status imageName attrs =
 
 -- | Unfavorite a tweet
 unFavorite :: String -> Token -> IO [Favorite]
-unFavorite id_str token = fmap (parseTimeline) . runOAuthM token $ doRequest POST ("favorites/destroy/" ++ id_str) []
+unFavorite id token = fmap (parseTimeline) . runOAuthM token $ doRequest POST ("favorites/destroy/" ++ id) []
 
 -- | Get favorites
 getFavorites :: [Option] -> Token -> IO [Favorite]
@@ -373,8 +382,8 @@ mentions token opts = fmap parseTimeline . runOAuthM token $ doRequest GET "stat
 
 -- | Get a @Status@ corresponding to the given id, without authentication.
 getStatus :: String -> IO Status
-getStatus id_str = withoutAuth $ do
-    rsp <- doRequest GET "statuses/show" [("id", id_str)]
+getStatus id = withoutAuth $ do
+    rsp <- doRequest GET "statuses/show" [("id", id)]
     return . handleErrors (makeJSON >=> readJSON) $ rsp
 
 -- | Get a @Status@ corresponding to the given id, with authentication.
