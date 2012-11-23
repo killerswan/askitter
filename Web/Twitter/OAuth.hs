@@ -29,7 +29,6 @@ reqUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/request_token"
 
 accUrl :: Request
 accUrl = fromJust . parseURL $ "https://api.twitter.com/oauth/access_token"
--- note the call to parseURL returns a Maybe Request (created using the ReqHttp constructor)
 
 authUrl :: Token -> [Char]
 authUrl = ("https://api.twitter.com/oauth/authorize?oauth_token=" ++)
